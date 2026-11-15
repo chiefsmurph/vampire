@@ -1,0 +1,5 @@
+# sha256 of denylisted UPPERCASE tokens (private tickers). Hashes only, so the public repo does not leak them.
+55863f7fd458e3285cf2e5061961bf9c42882b388aa0e131973a6f40ee720a5f
+340b9e2c84ec8aaf2eb798708f31660c9ae0a5b6f9b413711dd687f92f3f011b
+e604a88fdf7c9f795783879988c6345935edad87b2e6ae9186341d68f7f48661
+b811b8ca77f4fe74e1309f97812bbb18dfd697e13af3b3381df1374f577b67c8

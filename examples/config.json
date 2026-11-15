@@ -1,0 +1,20 @@
+{
+  "_comment": "Example: plain 1x SPY, 200-day SMA gate. Night = hold SPY close->open, day = hold the inverse ETF open->close (optional). The real parameters live in the private config.",
+  "maLength": 200,
+  "feed": "sip",
+  "dryEquity": 100000,
+  "maxTargetPct": 1.05,
+  "dayNotional": 1,
+  "killSwitchFile": "KILL",
+  "legs": [
+    { "name": "A", "signal": "SPY", "night": "SPY", "day": "SH", "weight": 1.0 }
+  ],
+  "variants": {
+    "base": { "label": "Base: night only", "dayLeg": false },
+    "full": { "label": "Full: night + day", "dayLeg": true }
+  },
+  "accounts": {
+    "acct-base": { "variant": "base", "mode": "dry", "keyEnv": "ALPACA_KEY_BASE", "secretEnv": "ALPACA_SECRET_BASE" },
+    "acct-full": { "variant": "full", "mode": "dry", "keyEnv": "ALPACA_KEY_FULL", "secretEnv": "ALPACA_SECRET_FULL" }
+  }
+}

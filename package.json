@@ -1,0 +1,14 @@
+{
+  "name": "vampire",
+  "version": "0.1.0",
+  "description": "Generic auction-execution framework: gated leveraged overnight / inverse intraday strategies on Alpaca, with calendar-aware scheduling, reconciliation against official auction prices, and a backtest twin.",
+  "type": "module",
+  "bin": { "vampire": "bin/vampire.js" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "guard": "bash scripts/public-guard.sh",
+    "simulate": "node bin/vampire.js simulate"
+  },
+  "engines": { "node": ">=22" },
+  "license": "MIT"
+}

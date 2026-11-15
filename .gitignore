@@ -1,0 +1,8 @@
+node_modules/
+data/
+logs/
+.env
+.env.*
+KILL
+*.tmp
+__pycache__/
