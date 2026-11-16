@@ -3,6 +3,7 @@ import { addDays, etParts, etInstant } from './time.js';
 import { legSignal } from './signal.js';
 import { applyLedger, getCalendarRow, loadState, stateFile } from './engine.js';
 import { targetQty } from './plan.js';
+import { FALLBACK_TAGS } from './fallback.js';
 
 const r2 = (x) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 100) / 100);
 
@@ -46,8 +47,10 @@ export function twinStep(twin, { legs, variant, bars, flagPrev, flagNow, dayNoti
 /** Ordered reason codes. Events (missed/partial/flip/fee) always count; rounding/unknown only when the diff is material. */
 export function reasonCodes({ orders = [], flips = [], feeUsd = 0, diffBp = 0, twinShares = {}, actualShares = {}, materialBp = 1 }) {
   const reasons = [];
-  if (orders.some((o) => ['canceled', 'expired', 'rejected'].includes(o.status) || Number(o.filledQty || 0) === 0)) reasons.push('missed_auction');
-  if (orders.some((o) => Number(o.filledQty) > 0 && Number(o.filledQty) < Number(o.qty))) reasons.push('partial_fill');
+  const auction = orders.filter((o) => !o.fallback), fb = orders.filter((o) => o.fallback);
+  if (auction.some((o) => ['canceled', 'expired', 'rejected'].includes(o.status) || Number(o.filledQty || 0) === 0)) reasons.push('missed_auction');
+  if (auction.some((o) => Number(o.filledQty) > 0 && Number(o.filledQty) < Number(o.qty))) reasons.push('partial_fill');
+  if (fb.length) reasons.push('fallback_used'); // a fallback order existed; its fills are counted in actualShares
   if (flips.length) reasons.push('signal_flip');
   if (feeUsd > 0) reasons.push('fee');
   if (Math.abs(diffBp) >= materialBp) {
@@ -83,10 +86,11 @@ async function collectFills(ctx, broker, accountName, date, phases) {
   for (const o of orders) {
     const ph = (o.client_order_id.split('-').slice(-3)[0]);
     if (phases && !phases.includes(ph)) continue;
+    const fallback = FALLBACK_TAGS.includes(ph);
     const bar = await ctx.data.officialBar(o.symbol, date);
-    const official = bar ? (o.time_in_force === 'opg' ? bar.o : bar.c) : null;
+    const official = bar ? ((fallback ? ph === 'fbopen' : o.time_in_force === 'opg') ? bar.o : bar.c) : null;
     const fill = o.filled_avg_price ? Number(o.filled_avg_price) : null;
-    fills.push({ symbol: o.symbol, side: o.side, tif: o.time_in_force, qty: Number(o.qty), filledQty: Number(o.filled_qty || 0), status: o.status, fill, official, officialSource: bar?.source ?? null, slipBp: slippageBp(o.side, fill, official) });
+    fills.push({ ...(fallback ? { fallback: true, leg: ph === 'fbopen' ? 'fallback-open' : 'fallback-ah' } : {}), symbol: o.symbol, side: o.side, tif: o.time_in_force, qty: Number(o.qty), filledQty: Number(o.filled_qty || 0), status: o.status, fill, official, officialSource: bar?.source ?? null, slipBp: slippageBp(o.side, fill, official) });
   }
   return fills;
 }
@@ -109,11 +113,12 @@ export async function reconcilePhase(ctx, accountName, phase) {
     if (state.phases[date]?.[phase]?.ok) return { ...out, status: 'skipped', reason: 'already-done' };
 
     const live = acct.mode !== 'dry';
-    const fills = live ? await collectFills(ctx, broker, accountName, date, phase === 'reconcile-open' ? ['morning'] : ['morning', 'afternoon']) : [];
+    const fills = live ? await collectFills(ctx, broker, accountName, date, phase === 'reconcile-open' ? ['morning', 'fbopen'] : ['morning', 'afternoon', 'fbopen', 'fbclose']) : [];
     if (phase === 'reconcile-open') {
       ctx.store.appendJsonl(`fills-${acct.variant}.jsonl`, { type: 'open', date, fills });
-      const missed = fills.filter((f) => f.filledQty < f.qty);
-      if (missed.length) await ctx.alert(`VAMPIRE open auction problem ${accountName} ${date}`, missed.map((f) => `${f.side} ${f.qty} ${f.symbol}: ${f.status}, filled ${f.filledQty}`).join('\n'));
+      const missed = fills.filter((f) => f.filledQty < f.qty && !f.fallback);
+      const fbOf = (f) => fills.filter((x) => x.fallback && x.symbol === f.symbol && x.side === f.side);
+      if (missed.length) await ctx.alert(`VAMPIRE open auction problem ${accountName} ${date}`, missed.map((f) => `${f.side} ${f.qty} ${f.symbol}: ${f.status}, filled ${f.filledQty}${fbOf(f).length ? ` (fallback sent: ${fbOf(f).map((x) => `${x.filledQty}/${x.qty} ${x.status}`).join(', ')})` : ''}`).join('\n'));
       (state.phases[date] ||= {})[phase] = { ok: true };
       save();
       return { ...out, fills };
@@ -218,7 +223,7 @@ export function dailySummaryText(results) {
     lines.push(`${rec.variant} (${rec.mode}) ${rec.date}`,
       `  equity ${rec.equityEnd ?? 'n/a'}  actual ${rec.actualRetPct ?? 'n/a'}%  expected(twin) ${rec.expectedRetPct}%  diff ${rec.diffBp ?? 'n/a'} bp  reason ${rec.reason ?? '-'}`,
       `  cumulative: actual ${rec.cumActualPct ?? 'n/a'}%  twin ${rec.cumTwinPct}%  SPY ${rec.cumSpyPct ?? 'n/a'}%`);
-    for (const f of rec.fills) lines.push(`  ${f.side} ${f.filledQty}/${f.qty} ${f.symbol} ${f.tif} fill ${f.fill} vs official ${f.official} (${f.officialSource}) slip ${f.slipBp} bp`);
+    for (const f of rec.fills) lines.push(`  ${f.fallback ? '[FALLBACK ' + f.leg + '] ' : ''}${f.side} ${f.filledQty}/${f.qty} ${f.symbol} ${f.tif} fill ${f.fill} vs official ${f.official} (${f.officialSource}) slip ${f.slipBp} bp`);
     for (const f of rec.flips) lines.push(`  SIGNAL FLIP leg ${f.leg}: decided ${f.decisionOn ? 'on' : 'off'} @${f.decisionPrice}, official close ${f.officialClose} -> ${f.officialOn ? 'on' : 'off'}`);
     for (const n of rec.notes) lines.push(`  note: ${n}`);
   }

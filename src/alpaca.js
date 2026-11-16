@@ -41,6 +41,40 @@ export class Alpaca {
       throw e;
     }
   }
+  /**
+   * The ONLY non-auction order path. Used solely by src/fallback.js after an auction order expired/cancelled/part-filled.
+   *  kind 'ah-limit'    : extended-hours LIMIT, tif day, extended_hours true (Alpaca requires limit+day for extended hours)
+   *  kind 'open-market' : regular-hours MARKET, tif day
+   * submit() above still refuses everything but opg/cls.
+   */
+  async submitFallback({ symbol, qty, side, kind, limitPrice, clientId }) {
+    if (!Number.isInteger(qty) || qty < 1) throw new Error(`fallback needs whole shares, got ${qty}`);
+    if (!['buy', 'sell'].includes(side)) throw new Error(`bad side ${side}`);
+    let body;
+    if (kind === 'ah-limit') {
+      if (!(limitPrice > 0)) throw new Error('ah-limit fallback needs a positive limitPrice');
+      body = { symbol, qty: String(qty), side, type: 'limit', time_in_force: 'day', limit_price: limitPrice.toFixed(2), extended_hours: true, client_order_id: clientId };
+    } else if (kind === 'open-market') {
+      body = { symbol, qty: String(qty), side, type: 'market', time_in_force: 'day', client_order_id: clientId };
+    } else throw new Error(`unknown fallback kind ${kind}`);
+    try { return await this.#req(this.base, '/v2/orders', { method: 'POST', body }); }
+    catch (e) {
+      if (e.status === 422 && /client_order_id/i.test(e.message)) return { duplicate: true, client_order_id: clientId };
+      throw e;
+    }
+  }
+  /** Latest NBBO quote -> { bid, ask } (0/null when absent). */
+  async latestQuote(symbol) {
+    for (;;) {
+      try {
+        const r = await this.#req(URLS.data, `/v2/stocks/${symbol}/quotes/latest`, { query: { feed: this.feed } });
+        return { bid: Number(r.quote?.bp) || null, ask: Number(r.quote?.ap) || null };
+      } catch (e) {
+        if (e.status === 403 && this.feed === 'sip') { this.warn('SIP feed not permitted; using IEX'); this.feed = 'iex'; continue; }
+        throw e;
+      }
+    }
+  }
   /** Daily bars [{date,o,h,l,c,v}] (split-adjusted). Downgrades SIP -> IEX on 403 and warns. */
   async dailyBars(symbol, start, end) {
     const out = []; let token;

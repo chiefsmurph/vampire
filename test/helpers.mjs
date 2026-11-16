@@ -40,6 +40,15 @@ export class FakeBroker {
     this.orderList.push(rec);
     return rec;
   }
+  async latestQuote(sym) { return this.quotes?.[sym] ?? { bid: 99.5, ask: 100 }; }
+  async latestPrice(sym) { return { price: this.lasts?.[sym] ?? 100 }; }
+  async submitFallback(o) {
+    if (this.failFallback) throw new Error('fallback rejected');
+    this.fallbacks = [...(this.fallbacks || []), o];
+    const rec = { id: 'f' + this.fallbacks.length, client_order_id: o.clientId, symbol: o.symbol, side: o.side, qty: String(o.qty), filled_qty: '0', status: 'new', time_in_force: 'day' };
+    this.orderList.push(rec);
+    return rec;
+  }
 }
 
 export function testCtx({ mode = 'dry', at = '2026-11-16T09:20', slope = 0.15, data, broker } = {}) {

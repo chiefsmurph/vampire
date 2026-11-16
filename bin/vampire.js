@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { makeCtx } from '../src/context.js';
 import { runPhase } from '../src/engine.js';
+import { runFallback } from '../src/fallback.js';
 import { dailySummaryText, reconcilePhase } from '../src/reconcile.js';
 import { preflight, preflightOk } from '../src/preflight.js';
 import { formatSimulation, simulate } from '../src/simulate.js';
@@ -11,7 +12,7 @@ const cmd = argv[0];
 const flag = (n) => argv.includes(`--${n}`);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 const USAGE = `vampire <command>
-  run <morning|afternoon|reconcile-open|reconcile-close> [--account NAME] [--now ISO] [--force] [--confirm-live]
+  run <morning|afternoon|reconcile-open|reconcile-close|fallback-open|fallback-close> [--account NAME] [--now ISO] [--force] [--confirm-live]
   simulate [--date YYYY-MM-DD] [--equity 100000]     full dry run, prints the planned orders
   preflight [--account NAME]                         verify keys, account, symbols, calendar, feed
   status                                             per-account mode, last runs
@@ -43,7 +44,7 @@ async function main() {
     const names = opt('account') ? [opt('account')] : Object.keys(ctx.cfg.accounts);
     const results = [];
     for (const n of names) {
-      const r = phase.startsWith('reconcile') ? await reconcilePhase(ctx, n, phase) : await runPhase(ctx, n, phase, { force: flag('force'), confirmLive: flag('confirm-live') });
+      const r = phase.startsWith('reconcile') ? await reconcilePhase(ctx, n, phase) : phase.startsWith('fallback') ? await runFallback(ctx, n, phase, { confirmLive: flag('confirm-live') }) : await runPhase(ctx, n, phase, { force: flag('force'), confirmLive: flag('confirm-live') });
       results.push(r);
       console.log(JSON.stringify({ account: n, phase, status: r.status, reason: r.reason, kind: r.kind, error: r.error, orders: r.orders?.map((o) => `${o.side} ${o.qty} ${o.symbol} ${o.tif} ${o.status}`) }));
     }
