@@ -2,9 +2,10 @@
 import { makeCtx } from '../src/context.js';
 import { runPhase } from '../src/engine.js';
 import { runFallback } from '../src/fallback.js';
-import { dailySummaryText, reconcilePhase } from '../src/reconcile.js';
+import { reconcilePhase } from '../src/reconcile.js';
 import { preflight, preflightOk } from '../src/preflight.js';
 import { formatSimulation, simulate } from '../src/simulate.js';
+import { runSummary } from '../src/summary.js';
 import { etParts } from '../src/time.js';
 
 const argv = process.argv.slice(2);
@@ -13,6 +14,7 @@ const flag = (n) => argv.includes(`--${n}`);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 const USAGE = `vampire <command>
   run <morning|afternoon|reconcile-open|reconcile-close|fallback-open|fallback-close> [--account NAME] [--now ISO] [--force] [--confirm-live]
+  run summary [--date YYYY-MM-DD] [--force] [--no-email]   daily summary email + dashboard JSON (idempotent)
   simulate [--date YYYY-MM-DD] [--equity 100000]     full dry run, prints the planned orders
   preflight [--account NAME]                         verify keys, account, symbols, calendar, feed
   status                                             per-account mode, last runs
@@ -41,16 +43,18 @@ async function main() {
   }
   if (cmd === 'run') {
     const phase = argv[1];
+    if (phase === 'summary') {
+      const r = await runSummary(ctx, { date: opt('date', etParts(ctx.now()).date), force: flag('force'), email: !flag('no-email') });
+      console.log(JSON.stringify({ phase, status: r.status, reason: r.reason, error: r.error, date: r.date }));
+      if (flag('print') && r.text) console.log(r.text);
+      process.exit(r.status === 'error' ? 2 : 0);
+    }
     const names = opt('account') ? [opt('account')] : Object.keys(ctx.cfg.accounts);
     const results = [];
     for (const n of names) {
       const r = phase.startsWith('reconcile') ? await reconcilePhase(ctx, n, phase) : phase.startsWith('fallback') ? await runFallback(ctx, n, phase, { confirmLive: flag('confirm-live') }) : await runPhase(ctx, n, phase, { force: flag('force'), confirmLive: flag('confirm-live') });
       results.push(r);
       console.log(JSON.stringify({ account: n, phase, status: r.status, reason: r.reason, kind: r.kind, error: r.error, orders: r.orders?.map((o) => `${o.side} ${o.qty} ${o.symbol} ${o.tif} ${o.status}`) }));
-    }
-    if (phase === 'reconcile-close' && results.some((r) => r.record)) {
-      const dry = results.every((r) => r.mode === 'dry');
-      await ctx.alert(`Vampire daily summary ${etParts(ctx.now()).date}${dry ? ' [DRY]' : ''}`, dailySummaryText(results));
     }
     process.exit(results.some((r) => r.status === 'error') ? 2 : 0);
   }

@@ -200,7 +200,7 @@ export async function reconcilePhase(ctx, accountName, phase) {
     state.twin = { ...twinNext, date };
     (state.phases[date] ||= {})[phase] = { ok: true };
     save();
-    ctx.store.writeJson('strategy-overnight-paper.json', buildSummary(ctx.store, cfg, now));
+    ctx.store.writeJson('strategy-overnight-paper.json', { ...ctx.store.readJson('strategy-overnight-paper.json', {}), ...buildSummary(ctx.store, cfg, now) });
     return { ...out, record: rec };
   } catch (e) {
     await ctx.alert(`VAMPIRE reconcile FAILURE ${accountName} ${date} ${phase}`, String(e.stack || e.message));
